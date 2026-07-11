@@ -1,0 +1,18 @@
+# Secrets
+.env
+
+# Personal data
+bookmarks.db
+bookmarks.db-shm
+bookmarks.db-wal
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS
+.DS_Store
