@@ -89,7 +89,7 @@ def parse_chrome_json(path: Path) -> list[dict]:
     for root_key in ("bookmark_bar", "other", "synced"):
         node = roots.get(root_key)
         if node:
-            walk(node, [node.get("name", root_key)])
+            walk(node, [])
     return out
 
 
