@@ -5,6 +5,7 @@
 bookmarks.db
 bookmarks.db-shm
 bookmarks.db-wal
+bookmarks*.html
 
 # Python
 .venv/
@@ -16,3 +17,9 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Watcher / server logs
+watch.log
+watch.error.log
+serve.log
+*.enrich.lock

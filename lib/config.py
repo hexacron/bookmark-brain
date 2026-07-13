@@ -12,3 +12,9 @@ CHROME_BOOKMARKS = Path(os.environ.get(
 ))
 WATCHER_DEBOUNCE_SECS = float(os.environ.get("BRAIN_DEBOUNCE", "4"))
 DECAY_DAYS = int(os.environ.get("BRAIN_DECAY_DAYS", "180"))
+
+# Freeform description of the user, used to guess *why* a bookmark was saved.
+# Override to match your own interests, e.g. "a backend engineer into distributed systems".
+USER_PERSONA = os.environ.get(
+    "BRAIN_USER_PERSONA", "someone who saves a wide variety of things worth revisiting"
+)
