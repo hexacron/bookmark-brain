@@ -130,6 +130,7 @@ bookmark-brain/
 ├── brain.py              ← CLI entry point
 ├── setup.sh              ← venv + deps + key prompt
 ├── requirements.txt
+├── requirements-dev.txt  ← adds pytest, for running the test suite
 ├── .env.example
 ├── lib/
 │   ├── parse.py          ← Bookmarks HTML export / Chrome JSON parser
@@ -142,8 +143,16 @@ bookmark-brain/
 │   ├── server.py         ← FastAPI app
 │   ├── db.py             ← SQLite schema + helpers
 │   └── config.py
+├── tests/                ← pytest suite for the pure-logic modules (parse, cull, llm)
 └── static/
     └── index.html        ← Chat UI
+```
+
+## Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/
 ```
 
 ## Troubleshooting

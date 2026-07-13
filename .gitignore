@@ -5,6 +5,7 @@
 bookmarks.db
 bookmarks.db-shm
 bookmarks.db-wal
+bookmarks.db.bak*
 bookmarks*.html
 
 # Python
