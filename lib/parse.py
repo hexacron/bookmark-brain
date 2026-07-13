@@ -94,14 +94,20 @@ def parse_chrome_json(path: Path) -> list[dict]:
 
 
 def parse_any(path: Path) -> list[dict]:
-    """Auto-detect format by extension."""
+    """Auto-detect format by extension, or by content for extensionless files."""
     p = Path(path)
-    if p.suffix.lower() == ".html" or p.suffix.lower() == ".htm":
+    if p.suffix.lower() in (".html", ".htm"):
         return parse_html_export(p)
     if p.suffix.lower() == ".json" or p.name == "Bookmarks":
         return parse_chrome_json(p)
-    # Try HTML first, fall back to JSON
-    try:
-        return parse_html_export(p)
-    except Exception:
+
+    # No recognizable extension: sniff the content instead of guessing blindly.
+    text = p.read_text(encoding="utf-8")
+    stripped = text.lstrip()
+    if stripped.startswith("{"):
         return parse_chrome_json(p)
+    if stripped.startswith("<"):
+        return parse_html_export(p)
+    raise ValueError(
+        f"Could not detect bookmarks format for {p}: expected HTML export or Chrome JSON."
+    )

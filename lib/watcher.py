@@ -27,10 +27,10 @@ def _ingest_and_enrich(db_path: Path, bookmarks_path: Path) -> None:
     inserted = 0
     with db.connect(db_path) as conn:
         for b in kept:
-            existing = conn.execute("SELECT id FROM bookmarks WHERE url=?", (b["url"],)).fetchone()
-            db.upsert_bookmark(conn, url=b["url"], title=b["title"],
-                               folder=b["folder"], add_date=b["add_date"])
-            if not existing:
+            _, was_inserted = db.upsert_bookmark(
+                conn, url=b["url"], title=b["title"], folder=b["folder"], add_date=b["add_date"]
+            )
+            if was_inserted:
                 inserted += 1
         conn.commit()
 
@@ -81,6 +81,12 @@ class _BookmarkHandler(FileSystemEventHandler):
     def on_created(self, event) -> None:
         # Chrome uses atomic rename on some OS versions → FileCreatedEvent not FileModifiedEvent
         if not event.is_directory and Path(event.src_path).name == "Bookmarks":
+            self._schedule()
+
+    def on_moved(self, event) -> None:
+        # Chrome's normal save path: write to a temp file, then rename it onto
+        # "Bookmarks" — watchdog reports this as a moved event, not created/modified.
+        if not event.is_directory and Path(event.dest_path).name == "Bookmarks":
             self._schedule()
 
 

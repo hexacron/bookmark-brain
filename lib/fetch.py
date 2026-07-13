@@ -16,10 +16,15 @@ USER_AGENT = (
 MAX_CONTENT_CHARS = 6000
 
 
-def extract_main_text(html: str) -> str:
-    """Best-effort extraction of main page content. Falls back to all text."""
-    soup = BeautifulSoup(html, "html.parser")
+def extract_title(soup: BeautifulSoup) -> Optional[str]:
+    """Pull <title> text from an already-parsed page, truncated for storage."""
+    if soup.title and soup.title.string:
+        return soup.title.string.strip()[:200]
+    return None
 
+
+def extract_main_text(soup: BeautifulSoup) -> str:
+    """Best-effort extraction of main page content from an already-parsed page."""
     # Drop noise
     for tag in soup(["script", "style", "noscript", "iframe", "svg", "form",
                      "nav", "footer", "header", "aside"]):
@@ -57,12 +62,9 @@ async def fetch_one(client: httpx.AsyncClient, url: str, timeout: float = 12.0) 
         if r.status_code == 200:
             ctype = (r.headers.get("content-type") or "").lower()
             if "text/html" in ctype or "application/xhtml" in ctype or ctype == "":
-                html = r.text
-                result["content_text"] = extract_main_text(html)
-                # Pull <title> directly for fallback
-                soup = BeautifulSoup(html, "html.parser")
-                if soup.title and soup.title.string:
-                    result["title_html"] = soup.title.string.strip()[:200]
+                soup = BeautifulSoup(r.text, "html.parser")
+                result["title_html"] = extract_title(soup)
+                result["content_text"] = extract_main_text(soup)
                 result["status"] = "ok"
             else:
                 # Non-HTML (PDF, video, etc.) — can't summarize easily

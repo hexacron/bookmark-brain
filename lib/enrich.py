@@ -1,23 +1,26 @@
 """Enrichment pipeline: fetch URL → extract content → LLM summary + tags."""
 import asyncio
+import contextlib
+import fcntl
 import json
-import os
 import time
 from pathlib import Path
 from typing import Optional
 
 import anthropic
 
-from . import db, fetch
+from . import config, db, fetch, llm
 
 
 SUMMARY_MODEL = "claude-haiku-4-5-20251001"
 
-PROMPT = """You're cataloguing a user's saved bookmarks for retrieval. Given the page content below, return a JSON object with three fields:
+PROMPT = """You're cataloguing a user's saved bookmarks for retrieval. \
+Given the page content below, return a JSON object with three fields:
 
 - "summary": 2-3 sentences. What is this page actually about? Concrete and specific. No marketing fluff.
-- "why_saved": one sentence guess at why someone professionally interested in OSINT, cybersecurity, and dev tooling would have saved this.
-- "tags": 3-5 short lowercase tags (kebab-case). Include topical tags (e.g. "osint", "rust", "data-leak") and content-type tags where relevant (e.g. "github-repo", "tool", "tutorial", "academic-paper", "news-article").
+- "why_saved": one sentence guess at why {persona} would have saved this.
+- "tags": 3-5 short lowercase tags (kebab-case). Include topical tags (e.g. "rust", "recipe", "productivity") \
+and content-type tags where relevant (e.g. "github-repo", "tool", "tutorial", "academic-paper", "news-article").
 
 Title: {title}
 URL: {url}
@@ -30,17 +33,37 @@ Page content:
 
 Respond with ONLY the JSON object, no preamble."""
 
+_LOCK_SUFFIX = ".enrich.lock"
 
-def _build_client() -> anthropic.Anthropic:
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set. Did you run setup.sh?")
-    return anthropic.Anthropic(api_key=key)
+
+@contextlib.contextmanager
+def _single_flight(db_path: Path):
+    """Cross-process advisory lock so only one enrichment run touches the DB at a time.
+
+    Guards against a manual `brain.py enrich` overlapping the watcher's own
+    auto-enrichment cycle (or two manual runs), which would otherwise write-race
+    the same SQLite file from independent connections.
+    """
+    lock_path = Path(db_path).with_suffix(Path(db_path).suffix + _LOCK_SUFFIX)
+    with open(lock_path, "w") as lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError(
+                "Another enrichment run is already in progress for this database."
+            ) from None
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _summarize_one(client: anthropic.Anthropic, *, title: str, url: str, folder: str, content: str) -> Optional[dict]:
     """Single LLM call with retries. Returns parsed dict or None on failure."""
-    prompt = PROMPT.format(title=title or "(untitled)", url=url, folder=folder or "(root)", content=content[:6000])
+    prompt = PROMPT.format(
+        title=title or "(untitled)", url=url, folder=folder or "(root)",
+        content=content[:6000], persona=config.USER_PERSONA,
+    )
     for attempt in range(3):
         try:
             resp = client.messages.create(
@@ -49,14 +72,8 @@ def _summarize_one(client: anthropic.Anthropic, *, title: str, url: str, folder:
                 messages=[{"role": "user", "content": prompt}],
             )
             text = resp.content[0].text.strip()
-            # Strip code fences if present
-            if text.startswith("```"):
-                text = text.split("```", 2)[1]
-                if text.startswith("json"):
-                    text = text[4:]
-                text = text.strip()
-            return json.loads(text)
-        except json.JSONDecodeError:
+            return llm.parse_json_response(text)
+        except (json.JSONDecodeError, ValueError):
             if attempt == 2:
                 return None
         except anthropic.RateLimitError:
@@ -69,7 +86,22 @@ def _summarize_one(client: anthropic.Anthropic, *, title: str, url: str, folder:
 
 
 async def enrich_corpus(conn, *, batch_size: int = 50, concurrency: int = 12, llm_concurrency: int = 6, max_items: Optional[int] = None):
-    """Run enrichment over all unfetched bookmarks. Streams progress to stdout."""
+    """Run enrichment over all unfetched bookmarks. Streams progress to stdout.
+
+    Raises RuntimeError if another enrichment run is already in progress for
+    this database (e.g. the watcher's auto-enrichment and a manual `enrich`
+    invocation overlapping).
+    """
+    db_path = Path(conn.execute("PRAGMA database_list").fetchone()["file"])
+    with _single_flight(db_path):
+        await _enrich_corpus_locked(
+            conn, batch_size=batch_size, concurrency=concurrency,
+            llm_concurrency=llm_concurrency, max_items=max_items,
+        )
+
+
+async def _enrich_corpus_locked(conn, *, batch_size: int, concurrency: int, llm_concurrency: int,
+                                 max_items: Optional[int]):
     pending = db.needs_enrichment(conn)
     if max_items:
         pending = pending[:max_items]
@@ -79,7 +111,7 @@ async def enrich_corpus(conn, *, batch_size: int = 50, concurrency: int = 12, ll
         return
 
     print(f"Enriching {total} bookmarks (batch={batch_size}, http={concurrency}, llm={llm_concurrency})")
-    client = _build_client()
+    client = llm.build_client()
     llm_sem = asyncio.Semaphore(llm_concurrency)
     processed = 0
     started = time.time()

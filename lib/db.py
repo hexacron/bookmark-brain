@@ -66,8 +66,13 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def upsert_bookmark(conn: sqlite3.Connection, url: str, title: str, folder: str, add_date: Optional[int]) -> int:
-    """Insert or update by URL. Returns row id. Does not touch enrichment fields."""
+def upsert_bookmark(
+    conn: sqlite3.Connection, url: str, title: str, folder: str, add_date: Optional[int]
+) -> tuple[int, bool]:
+    """Insert or update by URL. Does not touch enrichment fields.
+
+    Returns (row_id, was_inserted).
+    """
     cur = conn.execute("SELECT id FROM bookmarks WHERE url = ?", (url,))
     row = cur.fetchone()
     if row:
@@ -75,12 +80,12 @@ def upsert_bookmark(conn: sqlite3.Connection, url: str, title: str, folder: str,
             "UPDATE bookmarks SET title=?, folder=?, add_date=COALESCE(?, add_date) WHERE id=?",
             (title, folder, add_date, row["id"]),
         )
-        return row["id"]
+        return row["id"], False
     cur = conn.execute(
         "INSERT INTO bookmarks (url, title, folder, add_date) VALUES (?, ?, ?, ?)",
         (url, title, folder, add_date),
     )
-    return cur.lastrowid
+    return cur.lastrowid, True
 
 
 def needs_enrichment(conn: sqlite3.Connection) -> list[sqlite3.Row]:

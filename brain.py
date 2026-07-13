@@ -10,6 +10,7 @@ Usage:
 """
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -19,6 +20,8 @@ try:
     load_dotenv(Path(__file__).parent / ".env")
 except ImportError:
     pass
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from lib import config
 
@@ -44,12 +47,13 @@ def cmd_ingest(args):
     updated = 0
     with db.connect(config.DB_PATH) as conn:
         for b in kept:
-            existing = conn.execute("SELECT id FROM bookmarks WHERE url=?", (b["url"],)).fetchone()
-            db.upsert_bookmark(conn, url=b["url"], title=b["title"], folder=b["folder"], add_date=b["add_date"])
-            if existing:
-                updated += 1
-            else:
+            _, was_inserted = db.upsert_bookmark(
+                conn, url=b["url"], title=b["title"], folder=b["folder"], add_date=b["add_date"]
+            )
+            if was_inserted:
                 inserted += 1
+            else:
+                updated += 1
         conn.commit()
     print(f"  inserted: {inserted}, updated: {updated}")
     print(f"\nNext: python brain.py enrich")
